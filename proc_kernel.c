@@ -33,8 +33,11 @@ void proc_exit(void) { remove_proc_entry(PROC_NAME, NULL); }
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos) {
     pid_t pid = (pid_t)atomic_read(&target_pid);
-    char buffer[BUFFER_SIZE];
-    struct task_struct *task;
+    char *buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
+    if (buffer == NULL)
+        return -ENOMEM;
+
+    struct task_struct *task, *child;
     rcu_read_lock();
     if (pid == 0)
         task = current;
@@ -49,13 +52,23 @@ ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
     char task_name[TASK_COMM_LEN];
     get_task_comm(task_name, task);
     char task_stat_char = task_state_to_char(task);
+    int len = 0;
+    len = sprintf(buffer, "pid: %d, name: %s, state: %c\n", task->pid,
+                  task_name, task_stat_char);
+
+    list_for_each_entry(child, &task->children, sibling) {
+
+        char task_name[TASK_COMM_LEN];
+        get_task_comm(task_name, child);
+        char task_stat_char = task_state_to_char(child);
+        len += sprintf(buffer + len, "pid: %d, name: %s, state: %c\n",
+                       child->pid, task_name, task_stat_char);
+    }
+
     rcu_read_unlock();
-    int rv = sprintf(buffer, "pid: %d, name: %s, state: %c\n", task->pid,
-                     task_name, task_stat_char);
-
-    return simple_read_from_buffer(usr_buf, count, pos, buffer, rv);
-
-    return rv;
+    ssize_t rcount = simple_read_from_buffer(usr_buf, count, pos, buffer, len);
+    kfree(buffer);
+    return rcount;
 }
 
 ssize_t pwrite(struct file *file, const char __user *usr_buf, size_t count,
