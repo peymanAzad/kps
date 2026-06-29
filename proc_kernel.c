@@ -11,6 +11,9 @@
 
 static pid_t target_pid = 0;
 static DEFINE_MUTEX(lock);
+
+int proc_init(void);
+void proc_exit(void);
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos);
 ssize_t pwrite(struct file *, const char *, size_t, loff_t *);
