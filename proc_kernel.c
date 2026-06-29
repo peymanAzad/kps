@@ -1,4 +1,5 @@
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/pid.h>
 #include <linux/proc_fs.h>
 #include <linux/sched.h>
@@ -8,6 +9,7 @@
 #define PROC_NAME "hello"
 
 static pid_t target_pid = 0;
+static DEFINE_MUTEX(lock);
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos);
 ssize_t pwrite(struct file *, const char *, size_t, loff_t *);
@@ -27,12 +29,16 @@ void proc_exit(void) { remove_proc_entry(PROC_NAME, NULL); }
 
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos) {
+    mutex_lock(&lock);
+    pid_t pid = target_pid;
+    mutex_unlock(&lock);
+
     char buffer[BUFFER_SIZE];
     struct task_struct *task;
-    if (target_pid == 0)
+    if (pid == 0)
         task = current;
     else
-        task = pid_task(find_vpid(target_pid), PIDTYPE_PID);
+        task = pid_task(find_vpid(pid), PIDTYPE_PID);
 
     if (task == NULL) {
         return -ESRCH;
@@ -68,9 +74,11 @@ ssize_t pwrite(struct file *file, const char __user *usr_buf, size_t count,
         return -EINVAL;
 
     printk(KERN_INFO "inspector: received PID %ld\n", pid);
-    target_pid = pid;
+    mutex_lock(&lock);
+    target_pid = (pid_t)pid;
+    mutex_unlock(&lock);
 
-    return count; // must return count, not sscanf result
+    return count;
 }
 
 module_init(proc_init);
