@@ -2,6 +2,7 @@
 #include <linux/mutex.h>
 #include <linux/pid.h>
 #include <linux/proc_fs.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 
@@ -35,18 +36,21 @@ ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
 
     char buffer[BUFFER_SIZE];
     struct task_struct *task;
+    rcu_read_lock();
     if (pid == 0)
         task = current;
     else
         task = pid_task(find_vpid(pid), PIDTYPE_PID);
 
     if (task == NULL) {
+        rcu_read_unlock();
         return -ESRCH;
     }
 
     char task_name[TASK_COMM_LEN];
     get_task_comm(task_name, task);
     char task_stat_char = task_state_to_char(task);
+    rcu_read_unlock();
     int rv = sprintf(buffer, "pid: %d, name: %s, state: %c\n", task->pid,
                      task_name, task_stat_char);
 
