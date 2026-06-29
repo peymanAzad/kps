@@ -1,5 +1,5 @@
+#include <linux/atomic.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/pid.h>
 #include <linux/proc_fs.h>
 #include <linux/rcupdate.h>
@@ -9,8 +9,7 @@
 #define BUFFER_SIZE 128
 #define PROC_NAME "hello"
 
-static pid_t target_pid = 0;
-static DEFINE_MUTEX(lock);
+static atomic_t target_pid = ATOMIC_INIT(0);
 
 int proc_init(void);
 void proc_exit(void);
@@ -33,10 +32,7 @@ void proc_exit(void) { remove_proc_entry(PROC_NAME, NULL); }
 
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos) {
-    mutex_lock(&lock);
-    pid_t pid = target_pid;
-    mutex_unlock(&lock);
-
+    pid_t pid = (pid_t)atomic_read(&target_pid);
     char buffer[BUFFER_SIZE];
     struct task_struct *task;
     rcu_read_lock();
@@ -81,9 +77,7 @@ ssize_t pwrite(struct file *file, const char __user *usr_buf, size_t count,
         return -EINVAL;
 
     printk(KERN_INFO "inspector: received PID %ld\n", pid);
-    mutex_lock(&lock);
-    target_pid = (pid_t)pid;
-    mutex_unlock(&lock);
+    atomic_set(&target_pid, (int)pid);
 
     return count;
 }
