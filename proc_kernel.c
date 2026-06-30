@@ -8,6 +8,7 @@
 
 #define BUFFER_SIZE 128
 #define PROC_NAME "hello"
+#define MAX_DEPTH 8
 
 static atomic_t target_pid = ATOMIC_INIT(0);
 
@@ -16,6 +17,7 @@ void proc_exit(void);
 ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
               loff_t *pos);
 ssize_t pwrite(struct file *, const char *, size_t, loff_t *);
+int print_tree(struct task_struct *, char *, int, int);
 
 static struct proc_ops ops = {
     .proc_read = pread,
@@ -37,7 +39,7 @@ ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
     if (buffer == NULL)
         return -ENOMEM;
 
-    struct task_struct *task, *child;
+    struct task_struct *task;
     rcu_read_lock();
     if (pid == 0)
         task = current;
@@ -46,29 +48,42 @@ ssize_t pread(struct file *file, char __user *usr_buf, size_t count,
 
     if (task == NULL) {
         rcu_read_unlock();
+        kfree(buffer);
         return -ESRCH;
     }
 
-    char task_name[TASK_COMM_LEN];
-    get_task_comm(task_name, task);
-    char task_stat_char = task_state_to_char(task);
     int len = 0;
-    len = sprintf(buffer, "pid: %d, name: %s, state: %c\n", task->pid,
-                  task_name, task_stat_char);
-
-    list_for_each_entry(child, &task->children, sibling) {
-
-        char task_name[TASK_COMM_LEN];
-        get_task_comm(task_name, child);
-        char task_stat_char = task_state_to_char(child);
-        len += sprintf(buffer + len, "pid: %d, name: %s, state: %c\n",
-                       child->pid, task_name, task_stat_char);
-    }
+    len += print_tree(task, buffer, PAGE_SIZE, 0);
 
     rcu_read_unlock();
     ssize_t rcount = simple_read_from_buffer(usr_buf, count, pos, buffer, len);
     kfree(buffer);
     return rcount;
+}
+
+int print_tree(struct task_struct *node, char *buffer, int cap, int depth) {
+    if (depth > MAX_DEPTH || cap <= 0)
+        return 0;
+
+    int len = 0;
+    char task_name[TASK_COMM_LEN];
+    get_task_comm(task_name, node);
+    char task_stat_char = task_state_to_char(node);
+
+    for (int i = 0; i < depth; ++i)
+        len += snprintf(buffer + len, cap - len, " ");
+
+    len += snprintf(buffer + len, cap - len, "pid: %d, name: %s, state: %c\n",
+                    node->pid, task_name, task_stat_char);
+    if (len > cap) {
+        return cap;
+    }
+
+    struct task_struct *child;
+    list_for_each_entry(child, &node->children, sibling) {
+        len += print_tree(child, buffer + len, cap - len, depth + 1);
+    }
+    return len;
 }
 
 ssize_t pwrite(struct file *file, const char __user *usr_buf, size_t count,
